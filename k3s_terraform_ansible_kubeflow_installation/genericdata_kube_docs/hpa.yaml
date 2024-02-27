@@ -1,0 +1,28 @@
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+ name: node-hpa
+ namespace: kube_name
+ annotations:
+  app.gitlab.com/app: ci-path-slug   # ${CI_PROJECT_PATH_SLUG}
+  app.gitlab.com/env: ci-env-slug             # ${CI_ENVIRONMENT_SLUG}
+spec:
+ scaleTargetRef:
+   apiVersion: apps/v1
+   kind: Deployment
+   name: generic-data-api
+ minReplicas: 1
+ maxReplicas: 8
+ metrics:
+ - type: Resource
+   resource:
+    name: cpu
+    target:
+      type: Utilization
+      averageUtilization: 40
+ - type: Resource
+   resource:
+    name: memory
+    target:
+      type: Utilization
+      averageUtilization: 70

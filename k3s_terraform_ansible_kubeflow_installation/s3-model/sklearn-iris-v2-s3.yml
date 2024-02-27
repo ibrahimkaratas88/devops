@@ -1,0 +1,11 @@
+apiVersion: "serving.kubeflow.org/v1beta1"
+kind: "InferenceService"
+metadata:
+  name: "sklearn-irisv2-s3"
+  namespace: joseph
+spec:
+  predictor:
+    serviceAccountName: sa-s3
+    sklearn:
+      protocolVersion: "v2"
+      storageUri: "s3://kf.nioyatechai.com/iris"

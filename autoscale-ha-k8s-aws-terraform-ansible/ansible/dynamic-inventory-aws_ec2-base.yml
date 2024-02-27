@@ -1,0 +1,16 @@
+plugin: aws_ec2
+regions:
+  - ${TF_VAR_REGION}
+filters:
+  tag:Project: autoscale-ha-k8s-${TF_VAR_PROJECT_IDENTIFIER}
+keyed_groups:
+  - key: tags['Project']
+    prefix: 'all_instances'
+    separator: '_'
+  - key: tags['Role']
+    prefix: 'role'
+    separator: '_'
+hostnames:
+  - "ip-address"
+compose:
+  ansible_user: "'ubuntu'"

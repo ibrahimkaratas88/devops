@@ -1,0 +1,135 @@
+variables: 
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  TF_STATE_NAME: ${TF_VAR_PROJECT_IDENTIFIER}
+  TF_CACHE_KEY: ${TF_VAR_PROJECT_IDENTIFIER}
+  TF_ROOT: ${CI_PROJECT_DIR}/terraform
+  TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_VAR_PROJECT_IDENTIFIER}
+  ACCESS_KEY: ${AWS_ACCESS_KEY}
+  SECRET_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+stages:
+  - put-secret-key
+  - generate-k8s-cluster
+  - post-cluster-actions
+  - handle-failure
+
+put-secret-key-job:
+  stage: put-secret-key
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  script:
+  - echo "$ANSIBLE_KEY" | tr -d '\r' > gitlabkey.cer
+  - chmod 400 ./gitlabkey.cer
+  - secrets=($(aws secretsmanager list-secrets --region "$TF_VAR_REGION" | jq '.SecretList[].Name' |tr "\n" " " | tr -d '"')) || echo true
+  - |
+    if [[ " ${secrets[*]} " =~ " gitlabkey${TF_VAR_PROJECT_IDENTIFIER} " ]]; 
+    then 
+      aws secretsmanager put-secret-value --secret-id gitlabkey${TF_VAR_PROJECT_IDENTIFIER} --secret-string file://gitlabkey.cer --region "$TF_VAR_REGION"
+    else
+      aws secretsmanager create-secret --name gitlabkey${TF_VAR_PROJECT_IDENTIFIER} --secret-string file://gitlabkey.cer --region "$TF_VAR_REGION"
+    fi;
+  only:
+    - schedules
+  when: manual
+  tags:
+      - orient8-t3a.micro
+
+generate-k8s-cluster-job:
+  stage: generate-k8s-cluster
+  cache:
+    - key: ${TF_VAR_PROJECT_IDENTIFIER}
+      paths:
+        - ${TF_ROOT}/.terraform
+        - ${TF_ROOT}/.terraform.lock.hcl
+  image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+  script:
+  - apk update
+  - apk add python3 ansible py3-boto3 py3-botocore
+  - cd terraform
+  - echo "$ANSIBLE_KEY" | tr -d '\r' > gitlabkey.cer
+  - chmod 400 ./gitlabkey.cer
+  - apk add gettext
+  - cd ../ansible
+  - envsubst < dynamic-inventory-aws_ec2-base.yml > dynamic-inventory-aws_ec2.yml
+  - envsubst '${TF_VAR_PROJECT_IDENTIFIER} ${TF_VAR_REGION}' < playbook-master-base.yml > playbook-master.yml
+  - cat dynamic-inventory-aws_ec2.yml
+  - cat playbook-master.yml
+  - cd ../terraform
+  - envsubst '${TF_VAR_REGION} ${TF_VAR_PROJECT_IDENTIFIER}' < user-data-base.sh > user-data.sh
+  - envsubst '${TF_VAR_REGION} ${TF_VAR_PROJECT_IDENTIFIER}' < user-data-workers-base.sh > user-data-workers.sh
+  - cat user-data.sh
+  - cat user-data-workers.sh
+  - cat controlplane.tf
+  - cat workersplane.tf
+  - gitlab-terraform init
+  - gitlab-terraform plan
+  - gitlab-terraform apply -auto-approve
+  only:
+    - schedules
+  tags:
+    - orient8-t3a.micro
+  when: manual
+
+post-cluster-actions-job:
+  stage: post-cluster-actions
+  image: williamyeh/ansible:ubuntu18.04
+  script:
+    - apt update -y
+    - chmod 644 ./ansible
+    - cd ./ansible
+    - echo "$ANSIBLE_KEY" | tr -d '\r' > gitlabkey.cer
+    - chmod 400 ./gitlabkey.cer
+    - apt install -y gettext-base
+    - pip install --upgrade requests
+    - pip install boto boto3 netaddr passlib
+    - envsubst < dynamic-inventory-aws_ec2-base.yml > dynamic-inventory-aws_ec2.yml
+    - envsubst < playbook-postcluster-base.yml > playbook-postcluster.yml
+    - cat dynamic-inventory-aws_ec2.yml
+    - cat playbook-postcluster.yml
+    - export ANSIBLE_CONFIG=./ansible.cfg
+    - cd k8s
+    - envsubst < cluster-autoscaler-base.yml > cluster-autoscaler.yml
+    - envsubst < tls-cluster-issuer-prod-base.yml > tls-cluster-issuer-prod.yml
+    - cat cluster-autoscaler.yml
+    - cat tls-cluster-issuer-prod.yml
+    - cd ..
+    - sleep 90
+    - ansible-playbook -i ./dynamic-inventory-aws_ec2.yml -e "ansible_ssh_private_key_file=gitlabkey.cer" playbook-postcluster.yml
+  only:
+    - schedules
+  tags:
+    - orient8-t3a.micro
+  when: manual
+
+handle-failure-job:
+  stage: handle-failure
+  cache:
+    - key: ${TF_VAR_PROJECT_IDENTIFIER}
+      paths:
+        - ${TF_ROOT}/.terraform
+        - ${TF_ROOT}/.terraform.lock.hcl
+  image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+  script:
+    - cd terraform
+    - echo "$ANSIBLE_KEY" | tr -d '\r' > gitlabkey.cer
+    - chmod 400 ./gitlabkey.cer
+    - apk add gettext
+    - cd ../ansible
+    - envsubst < dynamic-inventory-aws_ec2-base.yml > dynamic-inventory-aws_ec2.yml
+    - envsubst '${TF_VAR_PROJECT_IDENTIFIER} ${TF_VAR_REGION}' < playbook-master-base.yml > playbook-master.yml
+    - cat dynamic-inventory-aws_ec2.yml
+    - cat playbook-master.yml
+    - cd ../terraform
+    - envsubst '${TF_VAR_REGION} ${TF_VAR_PROJECT_IDENTIFIER}' < user-data-base.sh > user-data.sh
+    - envsubst '${TF_VAR_REGION} ${TF_VAR_PROJECT_IDENTIFIER}' < user-data-workers-base.sh > user-data-workers.sh
+    - cat user-data.sh
+    - cat user-data-workers.sh
+    - cat controlplane.tf
+    - cat workersplane.tf
+    - gitlab-terraform destroy -auto-approve
+  #when: on_failure
+  when: manual
+  only:
+    - schedules
+  tags:
+    - orient8-t3a.micro

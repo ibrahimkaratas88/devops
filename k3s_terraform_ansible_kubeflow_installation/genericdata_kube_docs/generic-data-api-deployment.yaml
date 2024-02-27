@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    generic-service: generic-data-api
+  name: generic-data-api
+  namespace: kube_name
+  annotations:
+    app.gitlab.com/app: ci-path-slug   # ${CI_PROJECT_PATH_SLUG}
+    app.gitlab.com/env: ci-env-slug             # ${CI_ENVIRONMENT_SLUG}
+ 
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      generic-service: generic-data-api
+  template:
+    metadata:
+      labels:
+        generic-service: generic-data-api
+      annotations:
+        app.gitlab.com/app: ci-path-slug     # ${CI_PROJECT_PATH_SLUG}
+        app.gitlab.com/env: ci-env-slug        # ${CI_ENVIRONMENT_SLUG}
+    spec:
+      imagePullSecrets:
+      - name: projectx-registry
+      containers:
+      - image: gitlab.nioyatech.com:5050/projectx/generic-data-api:0.0.1-SNAPSHOT
+        name: generic-data-api
+        ports:
+          - containerPort: 8080
+        resources:
+          # limits:
+          #   memory: 400Mi
+          #   cpu: 900m
+          requests:
+            memory: 250Mi
+            cpu: 1    
+      #tolerations:
+      #- key: "clarus"
+        #operator: "Exists"
+        #effect: "NoSchedule"
+      restartPolicy: Always

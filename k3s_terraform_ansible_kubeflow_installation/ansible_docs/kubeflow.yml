@@ -1,0 +1,151 @@
+---
+- name: kubeflow install
+  hosts: _dev
+  tasks:
+  - name: update alpine
+    shell: apk add gcompat
+#
+##apk add gcompat
+  - name: install kustomize
+    shell : curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"  | bash
+
+  - name: add kustomize to path
+    become: true
+    shell : mv kustomize /usr/local/bin
+
+  - name: install git
+    apk:
+      name: git
+      state: latest
+
+  - name: copying manifests with playbook
+    become: true
+    copy:
+      src : /builds/mlops-on-cloud/kubeflow_project/manifests
+      dest: /home/alpine
+  #- name : clone repo
+  #  shell: git clone https://github.com/kubeflow/manifests.git
+  - name: copying files with playbook
+    become: true
+    copy:
+      src : /builds/mlops-on-cloud/kubeflow_project/new_kflow
+      dest: /home/alpine
+  - name: copying iris model files
+    become: true
+    copy:
+      src : /builds/mlops-on-cloud/kubeflow_project/iris_model
+      dest: /home/alpine
+  - name: copying storage setup files
+    become: true
+    copy:
+      src : /builds/mlops-on-cloud/kubeflow_project/kf-storage-setup
+      dest: /home/alpine
+  - name: copying S3 model serving files
+    become: true
+    copy:
+      src : /builds/mlops-on-cloud/kubeflow_project/s3-model
+      dest: /home/alpine
+  - name: install kflow-1
+    become: true
+    shell: kustomize build manifests/common/cert-manager/cert-manager/base | sudo kubectl apply -f -
+  - name: install kflow-2
+    become: true
+    shell: kustomize build manifests/common/cert-manager/kubeflow-issuer/base | sudo kubectl apply -f -
+  - name: install kflow-3
+    become: true
+    shell: kustomize build manifests/common/istio-1-9/istio-crds/base | sudo kubectl apply -f -
+  - name: install kflow-4
+    become: true
+    shell: kustomize build manifests/common/istio-1-9/istio-namespace/base | sudo kubectl apply -f -
+  - name: install kflow-5
+    become: true
+    shell: kustomize build manifests/common/istio-1-9/istio-install/base | sudo kubectl apply -f -
+  - name: install kflow-6
+    become: true
+    shell: kustomize build manifests/common/dex/overlays/aws-cognito | sudo kubectl apply -f - 
+  - name: install kflow-7
+    become: true
+    shell: kustomize build manifests/common/oidc-authservice/base | sudo kubectl apply -f -
+  - name: install kflow-8
+    become: true
+    shell: kustomize build manifests/common/knative/knative-serving/base | sudo kubectl apply -f -
+  - name: install kflow-9
+    become: true
+    shell: kustomize build manifests/common/istio-1-9/cluster-local-gateway/base | sudo kubectl apply -f -
+  - name: install kflow-10
+    become: true
+    shell: kustomize build manifests/common/knative/knative-eventing/base | sudo kubectl apply -f -
+  - name: install kflow-11
+    become: true
+    shell: kustomize build manifests/common/kubeflow-namespace/base | sudo kubectl apply -f -
+  - name: install kflow-12
+    become: true
+    shell: kustomize build manifests/common/kubeflow-roles/base | sudo kubectl apply -f -
+  - name: install kflow-13
+    become: true
+    shell: kustomize build manifests/common/istio-1-9/kubeflow-istio-resources/base | sudo kubectl apply -f -
+  - name: install kflow-14
+    become: true
+    shell: kustomize build manifests/apps/pipeline/upstream/env/platform-agnostic-multi-user | sudo kubectl apply -f -
+  - name: install kflow-15
+    become: true
+    shell: kustomize build manifests/apps/pipeline/upstream/env/platform-agnostic-multi-user-pns | sudo kubectl apply -f -
+  - name: install kflow-16
+    become: true
+    shell: kustomize build manifests/apps/kfserving/upstream/overlays/kubeflow | sudo kubectl apply -f -
+  - name: install kflow-17
+    become: true
+    shell: kustomize build manifests/apps/katib/upstream/installs/katib-with-kubeflow | sudo kubectl apply -f -
+  - name: install kflow-18
+    become: true
+    shell: kustomize build manifests/apps/centraldashboard/upstream/overlays/istio | sudo kubectl apply -f -
+  - name: install kflow-19
+    become: true
+    shell: kustomize build manifests/apps/admission-webhook/upstream/overlays/cert-manager | sudo kubectl apply -f -
+  - name: install kflow-20
+    become: true
+    shell: kustomize build manifests/apps/jupyter/notebook-controller/upstream/overlays/kubeflow | sudo kubectl apply -f -
+  - name: install kflow-21
+    become: true
+    shell: kustomize build manifests/apps/jupyter/jupyter-web-app/upstream/overlays/istio | sudo kubectl apply -f -
+  - name: install kflow-22
+    become: true
+    shell: kustomize build manifests/apps/profiles/upstream/overlays/kubeflow | sudo kubectl apply -f -
+  - name: install kflow-23
+    become: true
+    shell: kustomize build manifests/apps/volumes-web-app/upstream/overlays/istio | sudo kubectl apply -f -
+  - name : install kflow-24
+    become: true
+    shell: kustomize build manifests/apps/tensorboard/tensorboards-web-app/upstream/overlays/istio | sudo kubectl apply -f -
+  - name: install kflow-25
+    become: true
+    shell: kustomize build manifests/apps/tensorboard/tensorboard-controller/upstream/overlays/kubeflow | sudo kubectl apply -f -
+  - name: install kflow-26
+    become: true
+    shell: kustomize build manifests/apps/training-operator/upstream/overlays/kubeflow | sudo kubectl apply -f -
+  - name: install kflow-27
+    become: true
+    shell: kustomize build manifests/apps/mpi-job/upstream/overlays/kubeflow | sudo kubectl apply -f -
+  - name: install kflow-28
+    become: true
+    shell: kustomize build manifests/common/user-namespace/base | sudo kubectl apply -f -
+  - name: install kubeflow-2
+    shell: "{{ item }}"
+    with_items:
+      - cd /home/alpine/new_kflow
+      - sudo kubectl apply -f ca-issuer.yaml
+      - sudo kubectl apply -f traefik-istio-ingress.yaml
+      - sudo kubectl apply -f kf-redirect-https.yaml
+  - name: storage setup
+    shell: "{{ item }}"
+    with_items: 
+      - cd /home/alpine/s3-model
+      - sudo kubectl apply -f aws-s3-secret.yml
+      - cd /home/alpine/kf-storage-setup
+      - sudo kubectl apply -k "github.com/kubernetes-sigs/aws-ebs-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-1.5"
+      - sudo kubectl apply -f nfs-storage-class.yaml
+      - sudo kubectl apply -f nfs-pv.yaml
+      - sudo kubectl apply -f nfs-pvc.yaml  
+      - cd /home/alpine/s3-model
+      - sudo kubectl apply -f sa-s3.yml
+      - sudo kubectl apply -f sklearn-iris-v2-s3.yml

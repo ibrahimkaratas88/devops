@@ -1,0 +1,12 @@
+apiVersion: kubeflow.org/v1beta1
+kind: Profile
+metadata:
+  name: kubeflow-user1
+spec:
+  owner:
+    kind: User
+    name: armando@nioyatech.com
+  plugins:
+  - kind: WorkloadIdentity
+    spec:
+      gcpServiceAccount: kubeflow2@project-id.iam.gserviceaccount.com

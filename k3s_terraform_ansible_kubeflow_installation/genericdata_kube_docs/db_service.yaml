@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    postgres-service: generic-postgres
+  name: db-server
+  namespace: kube_name
+  annotations:
+    app.gitlab.com/app: ci-path-slug
+    app.gitlab.com/env: ci-env-slug 
+
+spec:
+  ports:
+    - name: http
+      port: 5432
+      targetPort: 5432
+  selector:
+    postgres-service: generic-postgres

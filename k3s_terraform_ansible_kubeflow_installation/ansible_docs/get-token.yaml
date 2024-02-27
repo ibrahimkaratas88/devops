@@ -1,0 +1,64 @@
+- name: get token
+  gather_facts: No
+  any_errors_fatal: true
+  hosts: _dev
+  become: true
+  tasks:
+
+  - name: add taint to server node
+    shell: kubectl taint nodes $(sudo kubectl get no | grep master | awk '{print $1}') clarus=way:NoSchedule
+
+  - name: add label to server node
+    shell: kubectl label nodes $(sudo kubectl get no | grep master | awk '{print $1}') master=db
+    
+  - name: copy file
+    copy:
+      src: "./gitlab-admin-service-account.yaml"
+      dest: /home/alpine/gitlab-admin-service-account.yaml   
+
+  - name: create service account
+    shell: kubectl apply -f /home/alpine/gitlab-admin-service-account.yaml 
+
+  - name: copy metrics-server-component file
+    copy:
+      src: "./components.yaml"
+      dest: /home/alpine/components.yaml  
+
+  - name: create metrics-server
+    shell: kubectl apply -f /home/alpine/components.yaml
+
+  - name: copy cluster autoscaler file
+    copy:
+      src: "./cluster-asg.yaml"
+      dest: /home/alpine/cluster-asg.yaml  
+
+  - name: create cluster auto-scaler
+    shell: kubectl apply -f /home/alpine/cluster-asg.yaml 
+
+
+  - name: get token
+    shell: kubectl -n kube-system describe secret $(kubectl -n kube-system get secret | grep gitlab | awk '{print $1}') | grep -A15 "gitlab-token"  | tail -1 | awk '{print $2}'
+    register: auth_token
+
+  - debug: msg='{{ auth_token.stdout.strip() }}'
+
+
+  - name: copy grafana definition file
+    copy:
+      src: "./grafana.yaml"
+      dest: /home/alpine/grafana.yaml   
+
+  - name: deploy grafana 
+    shell: kubectl apply -f /home/alpine/grafana.yaml 
+
+  - name: copy prometheus definition file
+    copy:
+      src: "./prometheus-deploy.yaml"
+      dest: /home/alpine/prometheus-deploy.yaml   
+
+  - name: deploy prometheus
+    shell: kubectl apply -f /home/alpine/prometheus-deploy.yaml
+
+  #
+
+

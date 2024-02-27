@@ -1,0 +1,283 @@
+
+image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+variables:
+  # Terraform folder for creating cluster
+  TF_ROOT: ${CI_PROJECT_DIR}/create_k3s_cluster_docs 
+  # Terraform folder for gitlab k3s integration
+  TF_ROOT_1: ${CI_PROJECT_DIR}/gitlab_k8s_integration_docs
+  
+  TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/ca-asg
+  # Ansible folder
+  ANSIBLE: ${CI_PROJECT_DIR}/ansible_docs
+  # Necessary Credentials 
+  ACCESS_KEY: ${AWS_ACCESS_KEY}
+  SECRET_KEY: ${AWS_SECRET_ACCESS_KEY}
+  GITLAB_TOKEN: ${gitlab_token}
+   
+
+
+
+stages:
+  - create_variable_file
+  - plan-k3s
+  - apply-k3s
+  - get_k3s_certs
+  - gitlab-k3s
+  - terminate-gitlab-k3s
+  - kube-deploy
+  - post-terminate-k3s
+
+# Creates variables file in TF_ROOT (create_k3s_cluster_docs)  
+create_variable_file:
+  image: ubuntu:latest
+  stage: create_variable_file
+  script:
+    - apt-get update -y
+    - apt-get install curl -y
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - apt-get install unzip
+    - unzip awscliv2.zip
+    - ./aws/install
+    - apt-get install gettext-base -y
+    - pwd
+    - ls
+    - cd create_variables_docs
+    - envsubst < variable_temp.sh > ../create_k3s_cluster_docs/variable.tf
+    
+    #- envsubst < variable_temp.sh > ../terraform_docs-1/variable.tf
+    #- cat ../terraform_docs-1/variable.tf
+  artifacts:
+    paths:
+      - ./create_variables_docs/
+      - ./create_k3s_cluster_docs
+      #- ./terraform_docs-1
+    expire_in: 1 day
+  only:
+    - dev
+    - armando_k3s_prometheus_grafana
+
+
+
+
+# Terraform plan for creating k3s cluster
+plan-k3s:
+  when: always
+  stage: plan-k3s
+  environment:
+    name: dev
+  before_script:
+  - cd ${TF_ROOT}
+  script:
+    - ls -al
+    - gitlab-terraform init 
+    - gitlab-terraform plan
+    - gitlab-terraform plan-json
+  artifacts:
+    name: plan
+    paths:
+      - ${TF_ROOT}/plan.cache
+    reports:
+      terraform: ${TF_ROOT}/plan.json
+  only:
+    - dev
+    - armando_k3s_prometheus_grafana
+
+
+# Terraform apply for creating k3s cluster
+apply-k3s:
+  stage: apply-k3s
+  environment:
+    name: dev
+  before_script:
+  - cd ${TF_ROOT}  
+  script:
+    - ls
+    - gitlab-terraform apply --auto-approve
+    # Create envirement variable (key pem file) for ansible
+    - PRIVATE_KEY=$(cat ./pem_key/eg-prod-projectx.pem | tr -d '\n' )
+    #- PUBLIC_KEY=$(cat ./pem_key/eg-prod-projectx.pub )
+    - echo "PRI_KEY=$PRIVATE_KEY" >> var.env
+    # Create envirement variable (public ip of server node) for ansible
+    - public_ip=$(gitlab-terraform output masters_public_ip | cut -d"\"" -f2)
+    - echo "PUB_IP=$public_ip" >> var.env
+    - echo
+  artifacts:
+    reports:
+      # To use environment variables with the other jobs
+      dotenv: ./create_k3s_cluster_docs/var.env
+  only:
+    - dev
+    - armando_k3s_prometheus_grafana
+
+
+# Get necessary data from server node instance with ansible for gilab k3s integration
+get_k3s_certs:
+  # ubuntu with ansible 
+  image: clarusway/ansible
+  stage: get_k3s_certs
+  dependencies:
+    - apply-k3s
+  before_script:
+    - cd ${ANSIBLE}
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  script: 
+    - ansible-inventory -i k3s_aws_ec2.yml --graph
+    # to create pem file from PRI_KEY environment variable
+    - echo $PRI_KEY | sed -e "s/-----BEGIN RSA PRIVATE KEY-----/&\n/" -e "s/-----END RSA PRIVATE KEY-----/\n&/" -e "s/\S\{64\}/&\n/g" > key.pem
+    - chmod 400 key.pem
+    - cat key.pem
+    # wait for creating cluster
+    - sleep 3m
+    # get CA Certificate from server node 
+    - k3s_cert=$(ansible-playbook -b -u alpine -i k3s_aws_ec2.yml get-cert.yaml --private-key=./key.pem | grep "msg" | cut -d \" -f 4)
+    # get service token from server node 
+    - k3s_token=$(ansible-playbook -b -u alpine -i k3s_aws_ec2.yml get-token.yaml --private-key=./key.pem | grep "msg" | cut -d \" -f 4) 
+    # Create envirement variable  for k3s gitlab integration
+    - echo "K3S_TOKEN=${k3s_token}"
+    - echo "K3S_CERT=${k3s_cert}"
+    - echo "K3S_CERT=${k3s_cert}" >> k3s.env
+    - echo "K3S_TOKEN=${k3s_token}" >> k3s.env
+    - cat k3s.env
+  
+   
+  artifacts:
+    paths:
+      - $ANSIBLE/
+    reports:
+      dotenv: ${ANSIBLE}/k3s.env
+  needs:
+    - job: apply-k3s
+      artifacts: true
+  only:
+    - dev
+    - armando_k3s_prometheus_grafana
+
+
+
+#terminate-k3s:
+#  environment:
+#    name: dev
+#  stage: terminate-k3s
+#  before_script:
+#  - cd ${TF_ROOT}
+#  script:
+#   - gitlab-terraform destroy
+#  when: manual
+
+
+# gilab k3s integration via terraform
+gitlab-k3s:
+  stage: gitlab-k3s
+  before_script:
+  - cd ${TF_ROOT_1}
+  script:
+    - echo $K3S_CERT >> cert-temp.txt
+    # configure ca certificate format and create cert.txt
+    - echo -e $(cat cert-temp.txt) > cert.txt
+    #create token.txt
+    - echo $K3S_TOKEN >> token.txt
+    # add public ip of server node to kube-gitlab.tf file 
+    - sed -i "s/publ_ip/$PUB_IP/g" kube-gitlab.tf 
+    - gitlab-terraform init
+    - gitlab-terraform plan
+    - gitlab-terraform apply --auto-approve
+  dependencies:
+    - get_k3s_certs
+    - apply-k3s
+  needs:
+    - job: get_k3s_certs
+      artifacts: true
+    - job: apply-k3s
+      artifacts: true
+  only:
+    - dev
+    - armando_k3s_prometheus_grafana
+
+
+# terminate gitlab k3s integration after finishing your work  
+terminate-gitlab-k3s:
+  environment:
+    name: dev
+  stage: terminate-gitlab-k3s
+  before_script:
+  - cd ${TF_ROOT_1}
+  script:
+    - sed -i "s/publ_ip/$PUB_IP/g" kube-gitlab.tf
+    - echo $K3S_CERT >> cert-temp.txt
+    - echo -e $(cat cert-temp.txt) > cert.txt
+    - echo $K3S_TOKEN >> token.txt
+    - gitlab-terraform destroy
+  when: manual  
+  dependencies:
+    - get_k3s_certs
+    - apply-k3s
+
+# deploy the application
+kube-deploy:
+  image: clarusway/ansible
+  stage: kube-deploy
+  before_script:
+    - cd ${ANSIBLE}
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  script: 
+    - ls
+    - cat key.pem
+    - ansible-inventory -i k3s_aws_ec2.yml --graph
+    - ansible-playbook -b -u alpine -i k3s_aws_ec2.yml kubeflow.yml --private-key=./key.pem
+  when: manual
+
+
+  #  # add kube namespace, project path slug and ci environment slug to generic-data-api-deployment.yaml for monitoring apps from gitlab
+  #  - sed -i "s/kube_name/$KUBE_NAMESPACE/g" ./genericdata_kube_docs/generic-data-api-deployment.yaml
+  #  - sed -i "s/ci-path-slug/$CI_PROJECT_PATH_SLUG/g" ./genericdata_kube_docs/generic-data-api-deployment.yaml
+  #  - sed -i "s/ci-env-slug/$CI_ENVIRONMENT_SLUG/g" ./genericdata_kube_docs/generic-data-api-deployment.yaml
+
+   # add kube namespace, project path slug and ci environment slug to postgres_pod.yaml for monitoring apps from gitlab
+  #  - sed -i "s/kube_name/$KUBE_NAMESPACE/g" ./genericdata_kube_docs/postgres_pod.yaml
+  #  - sed -i "s/ci-path-slug/$CI_PROJECT_PATH_SLUG/g" ./genericdata_kube_docs/postgres_pod.yaml
+  #  - sed -i "s/ci-env-slug/$CI_ENVIRONMENT_SLUG/g" ./genericdata_kube_docs/postgres_pod.yaml
+
+    # add kube namespace, project path slug and ci environment slug to genericdata_service.yaml for monitoring apps from gitlab
+  #  - sed -i "s/kube_name/$KUBE_NAMESPACE/g" ./genericdata_kube_docs/genericdata_service.yaml
+  #  - sed -i "s/ci-path-slug/$CI_PROJECT_PATH_SLUG/g" ./genericdata_kube_docs/genericdata_service.yaml
+  #  - sed -i "s/ci-env-slug/$CI_ENVIRONMENT_SLUG/g" ./genericdata_kube_docs/genericdata_service.yaml
+
+    # add kube namespace, project path slug and ci environment slug to db_service.yaml for monitoring apps from gitlab
+  #  - sed -i "s/kube_name/$KUBE_NAMESPACE/g" ./genericdata_kube_docs/db_service.yaml
+  #  - sed -i "s/ci-path-slug/$CI_PROJECT_PATH_SLUG/g" ./genericdata_kube_docs/db_service.yaml
+  #  - sed -i "s/ci-env-slug/$CI_ENVIRONMENT_SLUG/g" ./genericdata_kube_docs/db_service.yaml
+
+    # add kube namespace, project path slug and ci environment slug to hpa.yaml for monitoring apps from gitlab
+  #  - sed -i "s/kube_name/$KUBE_NAMESPACE/g" ./genericdata_kube_docs/hpa.yaml
+  #  - sed -i "s/ci-path-slug/$CI_PROJECT_PATH_SLUG/g" ./genericdata_kube_docs/hpa.yaml
+  #  - sed -i "s/ci-env-slug/$CI_ENVIRONMENT_SLUG/g" ./genericdata_kube_docs/hpa.yaml
+
+    # To create projectx registry secret to get private genericdata-api image from gitlab
+  #  - kubectl delete secret projectx-registry || kubectl get secret
+  #  - kubectl create secret docker-registry projectx-registry --docker-server=$CI_REGISTRY --docker-username=$CI_DEPLOY_USER_GROUP --docker-password=$CI_DEPLOY_PASSWORD_GROUP
+
+    # to deploy kubernetes object files
+  #  - kubectl apply -f ./genericdata_kube_docs/postgres_pod.yaml
+  #  - kubectl apply -f ./genericdata_kube_docs/db_service.yaml
+  #  - kubectl apply -f ./genericdata_kube_docs/generic-data-api-deployment.yaml
+  #  - kubectl apply -f ./genericdata_kube_docs/genericdata_service.yaml
+  #  - kubectl apply -f ./genericdata_kube_docs/hpa.yaml 
+  
+  environment:
+    name: dev
+    url : http://$PUB_IP:8080"
+
+# terminate the cluster after finishing the work
+post-terminate-k3s:
+  environment:
+    name: dev
+  stage: post-terminate-k3s
+  before_script:
+  - cd ${TF_ROOT}
+  script:
+    - gitlab-terraform destroy
+  when: manual
+  #
+  

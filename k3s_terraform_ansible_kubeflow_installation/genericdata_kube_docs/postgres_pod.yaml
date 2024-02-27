@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    postgres-service: generic-postgres
+  name: db-server
+  namespace: kube_name
+  annotations:
+    app.gitlab.com/app: ci-path-slug   # ${CI_PROJECT_PATH_SLUG}
+    app.gitlab.com/env: ci-env-slug             # ${CI_ENVIRONMENT_SLUG}
+ 
+spec:
+    containers:
+      - image: postgres:alpine
+        name: db-server
+        ports:
+          - containerPort: 5432
+        env:
+          - name: POSTGRES_DB
+            value: nioyatech
+          - name: POSTGRES_USER
+            value: nt-user
+          - name: POSTGRES_PASSWORD
+            value: changeit
+
+    tolerations:
+      - key: "clarus"
+        operator: "Equal"
+        value: "way"
+        effect: "NoSchedule"
+
+    restartPolicy: Always
+
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: master
+              operator: In
+              values:
+              - db     
+
+
+    

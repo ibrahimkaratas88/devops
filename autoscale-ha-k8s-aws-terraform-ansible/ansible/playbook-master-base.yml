@@ -1,0 +1,141 @@
+---
+- hosts: role_master${TF_VAR_PROJECT_IDENTIFIER}
+  become: true
+  tasks:
+
+  - name: change hostnames
+    shell: |
+      hostnamectl set-hostname "$(hostname).${TF_VAR_REGION}.compute.internal"
+
+  - name: swap off
+    shell: |
+      free -m
+      swapoff -a && sed -i '/ swap / s/^/#/' /etc/fstab
+
+  - name: Enable the nodes to see bridged traffic
+    shell: |
+      cat << EOF | tee /etc/sysctl.d/k8s.conf
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.bridge.bridge-nf-call-iptables = 1
+      EOF
+      sysctl --system
+      wget https://github.com/containerd/containerd/releases/download/v1.4.3/cri-containerd-cni-1.4.3-linux-amd64.tar.gz
+      apt-get install libseccomp2
+      tar --no-overwrite-dir -C / -xzf cri-containerd-cni-1.4.3-linux-amd64.tar.gz
+      systemctl daemon-reload
+      systemctl start containerd
+      mkdir -p /etc/systemd/system/kubelet.service.d
+      cat << EOF > /etc/systemd/system/kubelet.service.d/0-containerd.conf
+      [Service]
+      Environment="KUBELET_EXTRA_ARGS=--container-runtime=remote --runtime-request-timeout=15m --container-runtime-endpoint=unix:///run/containerd/containerd.sock"
+      EOF
+      systemctl daemon-reload
+
+  - name: Install packages that allow apt to be used over HTTPS
+    apt:
+      name: "{{ packages }}"
+      state: present
+      update_cache: yes
+    vars:
+      packages:
+      - apt-transport-https  
+      - curl
+      - ca-certificates
+      - awscli
+      - jq
+
+  - name: update apt-get and install kube packages
+    shell: |
+      curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+      echo "deb http://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list && \
+      apt-get update -q && \
+      apt-get install -qy kubelet=1.22.2-00 kubectl=1.22.2-00 kubeadm=1.22.2-00 
+
+  - name: Restart containerd and enable
+    service:
+      name: containerd
+      state: started
+      daemon_reload: yes
+      enabled: yes
+
+- hosts: role_master${TF_VAR_PROJECT_IDENTIFIER}
+  tasks:
+      
+  - name: pull kubernetes images before installation
+    become: yes
+    shell: kubeadm config images pull
+
+  - name: copy the configuration
+    become: yes
+    copy: 
+      src: ./k8s/clusterconfig-base.yml
+      dest: /home/ubuntu/
+  
+  - name: get gettext-base
+    become: true
+    apt:
+      package: gettext-base
+      state: present
+
+  - name: change controlplane_endpoint and produce the clusterconfig.yml file
+    shell: |
+      export CONTROLPLANE_ENDPOINT={{ CONTROLPLANE_ENDPOINT }}
+      envsubst < /home/ubuntu/clusterconfig-base.yml > /home/ubuntu/clusterconfig.yml
+
+  - name: initialize the Kubernetes cluster using kubeadm
+    become: true
+    shell: |
+      kubeadm init --config /home/ubuntu/clusterconfig.yml --upload-certs --ignore-preflight-errors=All --v=5
+
+  - name: Setup kubeconfig for ubuntu user
+    become: true
+    command: "{{ item }}"
+    with_items:
+      - mkdir -p /home/ubuntu/.kube
+      - cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+      - chown ubuntu:ubuntu /home/ubuntu/.kube/config
+
+  - name: Put the config file into aws secretsmanager
+    become: false
+    args:
+      executable: /bin/bash
+    shell: |
+        secret=$(aws secretsmanager list-secrets --region {{ REGION }} | jq '.SecretList[].Name' |tr "\n" " " | tr -d '"')
+        read -a secrets <<< $secret 
+        if [[ " ${secrets[*]} " =~ " publicip{{ PROJECT_IDENTIFIER }} " ]]
+        then 
+          aws secretsmanager put-secret-value --secret-id publicip{{ PROJECT_IDENTIFIER }} --secret-string {{ PUBLIC_IP }} --region {{ REGION }}
+        else
+          aws secretsmanager create-secret --name publicip{{ PROJECT_IDENTIFIER }} --secret-string {{ PUBLIC_IP }} --region {{ REGION }}
+        fi
+        if [[ " ${secrets[*]} " =~ " ltinstancenum{{ PROJECT_IDENTIFIER }} " ]]
+        then 
+          aws secretsmanager put-secret-value --secret-id ltinstancenum{{ PROJECT_IDENTIFIER }} --secret-string 0 --region {{ REGION }}
+        else
+          aws secretsmanager create-secret --name ltinstancenum{{ PROJECT_IDENTIFIER }} --secret-string 0 --region {{ REGION }}
+        fi
+
+  - name: copy the calico definition file
+    copy: 
+      src: ./k8s/calico.yaml
+      dest: /home/ubuntu/
+
+  - name: Install calico pod network
+    shell: kubectl apply -f /home/ubuntu/calico.yaml
+
+  - name: Patch the master
+    shell: | 
+      az=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone)
+      instance_id=$(curl http://169.254.169.254/latest/meta-data/instance-id )
+      HOSTNAME=$(hostname)
+      cat << EOF > patch.json
+      {
+        "spec": {
+          "providerID":"aws:///$az/$instance_id"
+        }
+      }
+      EOF
+      cat << EOF > command.sh
+      kubectl patch node $HOSTNAME -p "\$(cat patch.json)"
+      EOF
+      bash command.sh

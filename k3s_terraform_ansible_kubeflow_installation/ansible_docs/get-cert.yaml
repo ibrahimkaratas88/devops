@@ -1,0 +1,14 @@
+  - name: get certificate
+    gather_facts: No
+    any_errors_fatal: true
+    hosts: _dev
+    become: true
+    tasks:
+
+    - name: get secret
+      shell: kubectl get secret $(kubectl get secrets | awk '/default-token/ {print $1}') -o jsonpath="{['data']['ca\.crt']}" | base64 -d
+      register: ca_cert
+
+    - debug: msg='{{ ca_cert.stdout.strip() }}'
+
+# echo -e $(ansible-playbook -i hosts.ini  -b play-book.yaml --private-key=/home/james/.ssh/ntvir.pem | grep "msg" | cut -d \" -f 4) 

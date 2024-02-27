@@ -1,0 +1,43 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+data:
+  config.yaml: |
+    issuer: $(issuer)
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    web:
+      http: 0.0.0.0:5556
+    logger:
+      level: "debug"
+      format: text
+    oauth2:
+      skipApprovalScreen: true
+    connectors:
+      - type: oidc
+        id: aws-cognito
+        name: AWS Cognito
+        config:
+          issuer: $(cognito_issuer)
+          # Connector config values starting with a "$" will read from the environment.
+          clientID: $(cognito_client_id)
+          clientSecret: $(cognito_client_secret)
+          redirectURI: https://dev-kf.nioyatechai.com/dex/callback
+          #scopes:
+          #  - openid
+          #  - email
+          # getUserInfo: true # fails
+          insecureSkipEmailVerified: true
+          # insecureEnableGroups: true
+          userNameKey: "cognito:username"
+          # claimMapping: # supported in v2.25.0
+          #   groups: "cognito:groups"
+    staticClients:
+    - id: $(client_id)
+      redirectURIs: $(oidc_redirect_uris)
+      name: 'Dex Login Application'
+      secret: $(application_secret)

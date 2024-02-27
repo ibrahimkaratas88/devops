@@ -1,0 +1,17 @@
+apiVersion: kubeflow.org/v1beta1
+kind: Profile
+metadata:
+  name: MachineLearning   # replace with the name of profile you want
+spec:
+  owner:
+    kind: User
+    name: armando@nioyatech.com   # replace with the email of the user
+---
+apiVersion: kubeflow.org/v1beta1
+kind: Profile
+metadata:
+  name: Joseph   # replace with the name of profile you want
+spec:
+  owner:
+    kind: User
+    name: joseph@nioyatech.com   # replace with the email of the user
