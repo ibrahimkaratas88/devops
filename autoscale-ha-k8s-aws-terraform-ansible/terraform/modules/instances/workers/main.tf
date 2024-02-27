@@ -11,7 +11,7 @@ resource "aws_instance" "worker-1" {
     instance_type = "t2.medium"
         iam_instance_profile = module.iam.worker_profile_name
     vpc_security_group_ids = [module.secgroup.workers_sec_group_id, module.secgroup.mutual_sec_group_id]
-    key_name = "mattseukey"
+    key_name = "ibrahim"
     subnet_id = "subnet-0b3d4b8909fdba8c5"
     availability_zone = "eu-central-1a"
     tags = {
@@ -29,7 +29,7 @@ resource "aws_instance" "worker-2" {
     instance_type = "t2.medium"
     iam_instance_profile = module.iam.worker_profile_name
     vpc_security_group_ids = [module.secgroup.workers_sec_group_id, module.secgroup.mutual_sec_group_id]
-    key_name = "mattseukey"
+    key_name = "ibrahim"
     subnet_id = "subnet-0b3d4b8909fdba8c5"
     availability_zone = "eu-central-1a"
     tags = {

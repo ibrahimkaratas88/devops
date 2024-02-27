@@ -13,7 +13,7 @@ resource "aws_instance" "kube-master" {
   iam_instance_profile = module.iam.master_profile_name
   vpc_security_group_ids = [module.secgroup.controlplane_sec_group_id, module.secgroup.mutual_sec_group_id]
   key_name = "gitlab-ec2-access"
-  # key_name = "mattseukey"
+  # key_name = "ibrahim"
   subnet_id = "subnet-11a23d30"
   availability_zone = "us-east-1b" 
   # subnet_id = "subnet-0b3d4b8909fdba8c5"
@@ -35,7 +35,7 @@ resource "aws_instance" "kube-master" {
   #     iam_instance_profile = module.iam.master_profile_name
   #     vpc_security_group_ids = [module.secgroup.controlplane_sec_group_id, module.secgroup.mutual_sec_group_id]
   #     key_name = "gitlab-ec2-access"
-  #     # key_name = "mattseukey"
+  #     # key_name = "ibrahim"
   #     subnet_id = "subnet-11a23d30"
   #     availability_zone = "us-east-1b" 
   #     # subnet_id = "subnet-0b3d4b8909fdba8c5"
@@ -57,7 +57,7 @@ resource "aws_instance" "kube-master" {
   #     iam_instance_profile = module.iam.master_profile_name
   #     vpc_security_group_ids = [module.secgroup.controlplane_sec_group_id, module.secgroup.mutual_sec_group_id]
   #     key_name = "gitlab-ec2-access"
-  #     # key_name = "mattseukey"
+  #     # key_name = "ibrahim"
   #     subnet_id = "subnet-11a23d30"
   #     availability_zone = "us-east-1b" 
   #     # subnet_id = "subnet-0b3d4b8909fdba8c5"
@@ -78,7 +78,7 @@ resource "aws_launch_template" "asg-lt" {
   # image_id = "ami-05f7491af5eef733a"
   instance_type = "t2.medium"
   key_name = "gitlab-ec2-access"
-  # key_name = "mattseukey"
+  # key_name = "ibrahim"
   vpc_security_group_ids = [module.secgroup.controlplane_sec_group_id, module.secgroup.mutual_sec_group_id]
   user_data = filebase64("./user-data.sh")
   tag_specifications {

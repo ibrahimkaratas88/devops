@@ -23,7 +23,7 @@ terraform {
 
 provider "gitlab" {
   token = var.gitlab_token
-  base_url = "https://gitlab.nioyatech.com/"
+  base_url = "hxxxxxxxxxxxxxxx"
 }
 
 # Configure the AWS Provider

@@ -30,7 +30,7 @@ variable "INSTANCE_TYPE"{
 
 variable "KEY_NAME"{
     type = string
-    default = "mattseukey"
+    default = "ibrahim"
 }
 
 variable "DESIRED_CAPACITY_CTRLPLANE"{
