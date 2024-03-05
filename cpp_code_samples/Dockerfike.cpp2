@@ -1,0 +1,16 @@
+FROM ubuntu:20.04
+
+RUN apt-get update && apt-get install -y \
+   cmake                                 \
+   curl                                  \
+   gdb                                   \
+   lsb-release                           \
+   python3.8                             \
+   software-properties-common            \
+   wget                                  \
+   xz-utils
+
+COPY . /
+
+RUN ./install_clang.sh \
+    && rm -rf /var/lib/apt/lists
